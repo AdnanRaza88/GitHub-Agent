@@ -1,21 +1,21 @@
 # GitHub Agent
 
-A beautiful, light-themed Streamlit coding agent that lets you create, read, update and delete GitHub repositories and files using natural language.
+Black-and-white Streamlit coding agent for GitHub. Create, read, update and delete repositories and files using natural language.
 
 ## Features
 
-- **Two LLM providers**
-  - **Grok** (xAI) — `https://api.x.ai/v1`
+- **Providers (remote only)**
+  - **Groq** — `https://api.groq.com/openai/v1`
   - **OpenCode Zen** — `https://opencode.ai/zen/v1` (free models supported)
-- Model selection with checkboxes (free models preferred for OpenCode Zen)
+- Model selection with checkboxes
 - GitHub Personal Access Token authentication
-- Full CRUD:
-  - Create repositories
-  - Create / update / read files
-  - List repositories
-  - More actions via natural language
-- In-app code viewer + download button for generated files
-- Professional light UI following color-theory principles (cool neutrals + soft teal accent)
+- Prefers connected GitHub MCP tools
+- Full CRUD on repos and files
+- File Expert mode for deeper analysis
+- Single-file download + ZIP export
+- Pure black-and-white light theme (high contrast)
+- Explicit support for System / Light / Dark theme switcher visibility
+- No emojis in the UI
 
 ## Quick Start
 
@@ -24,19 +24,17 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-1. Paste your **GitHub PAT** (needs `repo` scope) in the sidebar.
-2. Choose **OpenCode Zen** or **Grok** and paste the corresponding API key.
-3. Click **Fetch Models** (or Use Defaults) and select the models you want.
-4. Chat naturally:  
-   - “Create a new public repo called my-awesome-project”  
-   - “Write a Python hello-world file in that repo”  
-   - “List my recent repositories”
+1. Paste your GitHub PAT (needs `repo` scope) in the sidebar.
+2. Choose **OpenCode Zen** or **Groq** and paste the API key.
+3. Click **Fetch Models** (or Use Defaults) and select models via checkboxes.
+4. Optionally enable **File Expert mode**.
+5. Chat naturally.
 
-## Security Notes
+## Security
 
 - Tokens and API keys stay in Streamlit session state only.
 - Never commit real tokens.
-- Prefer fine-grained GitHub tokens with the least privilege required.
+- Prefer fine-grained GitHub tokens.
 
 ## License
 
