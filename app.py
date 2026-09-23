@@ -1,8 +1,3 @@
-"""
-Aether — Multi-agent GitHub operator
-Clean Streamlit host with role-based agents, context compaction, sandbox notes.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -479,7 +474,7 @@ with st.sidebar:
         st.session_state.active_model = ""
         st.rerun()
 
-    key = st.text_input("API key", type="password", value=st.session_state.api_key, label_visibility="collapsed")
+    key = st.text_input("API Key", type="password", value=st.session_state.api_key, label_visibility="collapsed")
     if key != st.session_state.api_key:
         st.session_state.api_key = key
         st.session_state.fetched_models = []
@@ -487,10 +482,11 @@ with st.sidebar:
     b1, b2 = st.columns(2)
     with b1:
         if st.button("Fetch Models", use_container_width=True):
-            models = fetch_models(provider, st.session_state.api_key)
-            st.session_state.fetched_models = models
-            st.session_state.active_model = models[0] if models else ""
-            st.rerun()
+            with st.spinner("..."):
+                models = fetch_models(provider, st.session_state.api_key)
+                st.session_state.fetched_models = models
+                st.session_state.active_model = models[0] if models else ""
+                st.rerun()
     with b2:
         if st.button("Defaults", use_container_width=True):
             st.session_state.fetched_models = PROVIDERS[provider]["defaults"]
@@ -504,6 +500,8 @@ with st.sidebar:
         active = st.selectbox("Model", models, index=models.index(st.session_state.active_model), label_visibility="collapsed", key="model_box")
         st.session_state.active_model = active
         st.caption(active)
+    else:
+        st.warning("No models")
 
     st.markdown("---")
     st.session_state.file_expert = st.checkbox("File Expert", value=st.session_state.file_expert)
@@ -523,28 +521,31 @@ with st.sidebar:
 
     if st.button("List repos", use_container_width=True) and st.session_state.github_token:
         repos = gh_list_repos(st.session_state.github_token)
-        msg = "\n".join(f"- **{r['name']}** ({'private' if r.get('private') else 'public'}) — {r['html_url']}" for r in repos[:25])
-        st.session_state.messages.append({"role": "assistant", "content": msg or "No repos."})
-        st.session_state.projects[st.session_state.current_project]["messages"] = st.session_state.messages
-        st.rerun()
+        if repos:
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": "\n".join([f"- **{r['name']}** ({'private' if r.get('private') else 'public'}) — {r['html_url']}" for r in repos[:25]]),
+            })
+            st.session_state.projects[st.session_state.current_project]["messages"] = st.session_state.messages
+            st.rerun()
 
 st.markdown("# Aether")
-st.caption(f"Project · {st.session_state.current_project} · multi-agent · context-aware")
+st.caption(f"Project · {st.session_state.current_project}")
 
-est = sum(tokens(m.get("content", "")) for m in st.session_state.messages)
-if est:
-    st.caption(f"Context ≈ {est} tokens (auto-compacts near 5500)")
+tok_est = sum(tokens(m.get("content", "")) for m in st.session_state.messages)
+if tok_est:
+    st.caption(f"Context ~ {tok_est} tokens")
 
 for i, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        if msg["role"] == "user" and st.button("Resend", key=f"rs_{i}"):
+        if msg["role"] == "user" and st.button("Resend", key=f"r_{i}"):
             st.session_state.messages = st.session_state.messages[:i]
             st.session_state.projects[st.session_state.current_project]["messages"] = st.session_state.messages
             st.session_state["_resend"] = msg["content"]
             st.rerun()
 
-prompt = st.chat_input("Message…") or st.session_state.pop("_resend", None)
+prompt = st.chat_input("Message...") or st.session_state.pop("_resend", None)
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -552,35 +553,51 @@ if prompt:
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Working…"):
+        with st.spinner("..."):
             model = st.session_state.active_model
-            history = compact([{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-12:]])
+            history = compact([
+                {"role": m["role"], "content": m["content"]}
+                for m in st.session_state.messages[-10:]
+            ])
             system = SYSTEM
             if st.session_state.file_expert:
-                system += "\nFile Expert mode is on — deeper multi-file analysis."
-            sources = st.session_state.projects[st.session_state.current_project].get("sources", [])
-            if sources:
-                system += "\n\nProject sources:\n" + "\n---\n".join(sources[-4:])
+                system += "\nFile Expert mode enabled."
+            srcs = st.session_state.projects[st.session_state.current_project].get("sources", [])
+            if srcs:
+                system += "\n\nProject sources:\n" + "\n---\n".join(srcs[-4:])
 
-            reply = call_llm(st.session_state.provider, st.session_state.api_key, model, history, system)
+            reply = call_llm(
+                st.session_state.provider,
+                st.session_state.api_key,
+                model,
+                history,
+                system,
+            )
             st.markdown(reply)
             st.session_state.messages.append({"role": "assistant", "content": reply})
             st.session_state.projects[st.session_state.current_project]["messages"] = st.session_state.messages
 
             if "```json" in reply and st.session_state.github_token:
                 try:
-                    block = reply.split("```json")[1].split("```")[0].strip()
-                    data = json.loads(block)
-                    result = run_action(data.get("action", "other"), data.get("params") or {}, st.session_state.github_token, st.session_state.github_user)
+                    js = reply.split("```json")[1].split("```")[0].strip()
+                    data = json.loads(js)
+                    action = data.get("action", "")
+                    params = data.get("params") or {}
+                    result = run_action(action, params, st.session_state.github_token, st.session_state.github_user)
                     st.info(result)
                 except Exception as e:
-                    st.caption(f"Action parse: {e}")
+                    st.caption(str(e))
 
 if st.session_state.last_file:
     st.markdown("---")
     st.code(st.session_state.last_file, language="text")
-    st.download_button("Download file", data=st.session_state.last_file, file_name=st.session_state.last_name or "file.txt")
+    st.download_button("Download", data=st.session_state.last_file, file_name=st.session_state.last_name or "file.txt")
 
 if st.session_state.zip_files:
     st.markdown("---")
-    st.download_button("Download ZIP", data=make_zip(st.session_state.zip_files), file_name=f"aether-{datetime.now():%Y%m%d-%H%M}.zip", mime="application/zip")
+    st.download_button(
+        "Download ZIP",
+        data=make_zip(st.session_state.zip_files),
+        file_name=f"aether-{datetime.now():%Y%m%d-%H%M}.zip",
+        mime="application/zip",
+    )
