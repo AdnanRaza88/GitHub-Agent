@@ -1,40 +1,31 @@
 # GitHub Agent
 
-Black-and-white Streamlit coding agent for GitHub. Create, read, update and delete repositories and files using natural language.
+Streamlit app for GitHub with natural language. Glassmorphism sky-blue UI.
 
 ## Features
 
-- **Providers (remote only)**
-  - **Groq** — `https://api.groq.com/openai/v1`
-  - **OpenCode Zen** — `https://opencode.ai/zen/v1` (free models supported)
-- Model selection with checkboxes
-- GitHub Personal Access Token authentication
-- Prefers connected GitHub MCP tools
-- Full CRUD on repos and files
-- File Expert mode for deeper analysis
-- Single-file download + ZIP export
-- Pure black-and-white light theme (high contrast)
-- Explicit support for System / Light / Dark theme switcher visibility
-- No emojis in the UI
+- Create repositories (public or private)
+- Change visibility (public ↔ private)
+- Delete repositories
+- Create, update, read, delete files
+- List repos, ZIP export, File Expert mode
+- Providers: OpenRouter, Groq, Grok (xAI)
 
-## Quick Start
+## Run
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-1. Paste your GitHub PAT (needs `repo` scope) in the sidebar.
-2. Choose **OpenCode Zen** or **Groq** and paste the API key.
-3. Click **Fetch Models** (or Use Defaults) and select models via checkboxes.
-4. Optionally enable **File Expert mode**.
-5. Chat naturally.
+1. Paste GitHub PAT (repo scope).
+2. Choose provider and API key.
+3. Fetch Models, pick a model (prefer OpenRouter `:free`).
+4. Chat: e.g. make repo X private, delete repo Y (confirm first).
 
-## Security
+## Structure
 
-- Tokens and API keys stay in Streamlit session state only.
-- Never commit real tokens.
-- Prefer fine-grained GitHub tokens.
+See `docs/CODE_CONNECTION_MAP.md`.
 
 ## License
 
