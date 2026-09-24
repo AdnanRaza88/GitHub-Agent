@@ -134,31 +134,31 @@ SETTINGS = ROOT / "github_agent_settings.json"
 NOTES = ROOT / "notes"
 NOTES.mkdir(exist_ok=True)
 
-SYSTEM = """You are GitHub Agent, a professional coding assistant for GitHub repositories.
+SYSTEM = """You are GitHub Agent, an agentic coding assistant for GitHub.
 
-When an action is required, reply with a short plan then one JSON block:
+You maintain conversation context. Answer using prior turns. Do not repeat the same plan or the same JSON action unless the user asks again.
+
+When a GitHub action is needed, give a short answer then ONE JSON block only:
 
 ```json
 {"action":"create_repo|update_visibility|delete_repo|create_file|update_file|read_file|list_repos|delete_file|zip_files|save_markdown|other","params":{},"explanation":"brief"}
 ```
 
-Supported actions:
-- create_repo: name, description?, private? (bool)
-- update_visibility: owner?, repo, private (bool)
+Actions:
+- create_repo: name, description?, private?
+- update_visibility: owner?, repo, private
 - delete_repo: owner?, repo
 - create_file / update_file: owner?, repo, path, content, message, branch?
 - read_file: owner?, repo, path, ref?
 - list_repos
 - delete_file: owner?, repo, path, message, branch?
-- zip_files
-- save_markdown: filename, content
-- other
+- zip_files / save_markdown / other
 
 Rules:
-- Always confirm before delete_repo or delete_file.
-- Honor private/public choice exactly.
-- Be concise. Produce complete clean code. No emojis.
-- If the user spoke via voice, treat their transcript carefully; fix obvious speech recognition errors when intent is clear.
+- Confirm before delete_repo or delete_file.
+- Honor public/private exactly.
+- Voice transcripts may have STT errors; infer intent from context.
+- No emojis. No repeated timestamps or filler. Be concise.
 """
 
 
@@ -183,14 +183,23 @@ def tokens(text: str) -> int:
     return max(1, len(text or "") // 4)
 
 
-def compact(messages: List[Dict], budget: int = 5500) -> List[Dict]:
-    total = sum(tokens(m.get("content", "")) for m in messages)
-    if total < budget or len(messages) <= 6:
-        return messages
-    recent = messages[-6:]
-    older = messages[:-6]
-    summary = "Previous context:\n" + "\n".join(
-        f"{m.get('role')}: {(m.get('content') or '')[:160]}" for m in older[-8:]
+def compact(messages: List[Dict], budget: int = 8000) -> List[Dict]:
+    cleaned = []
+    for m in messages:
+        role = m.get("role") or "user"
+        content = (m.get("content") or "").strip()
+        if not content:
+            continue
+        if cleaned and cleaned[-1]["role"] == role and cleaned[-1]["content"] == content:
+            continue
+        cleaned.append({"role": role, "content": content})
+    total = sum(tokens(m.get("content", "")) for m in cleaned)
+    if total < budget or len(cleaned) <= 12:
+        return cleaned
+    recent = cleaned[-10:]
+    older = cleaned[:-10]
+    summary = "Earlier conversation summary:\n" + "\n".join(
+        f"{m.get('role')}: {(m.get('content') or '')[:200]}" for m in older[-12:]
     )
     return [{"role": "system", "content": summary}] + recent
 
@@ -544,27 +553,28 @@ def voice_panel_html(speak_text: str, auto_speak: bool, rate: float, pitch: floa
     auto = "true" if auto_speak and speak_text else "false"
     return f"""
 <div style="font-family:Inter,system-ui,sans-serif;padding:10px 12px;border-radius:16px;
-background:rgba(255,255,255,0.88);border:1px solid rgba(255,255,255,0.65);
+background:rgba(255,255,255,0.9);border:1px solid rgba(255,255,255,0.7);
 box-shadow:0 8px 28px rgba(3,105,161,0.12);">
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-    <button id="micBtn" style="padding:8px 14px;border-radius:12px;border:1px solid #7dd3fc;
+    <button id="micBtn" type="button" style="padding:8px 14px;border-radius:12px;border:1px solid #7dd3fc;
       background:linear-gradient(135deg,#fff,#e0f2fe);color:#0c4a6e;font-weight:700;cursor:pointer;">
-      Hold to talk
+      Start listening
     </button>
-    <button id="stopBtn" style="padding:8px 14px;border-radius:12px;border:1px solid #bae6fd;
+    <button id="stopBtn" type="button" style="padding:8px 14px;border-radius:12px;border:1px solid #bae6fd;
       background:#fff;color:#0369a1;font-weight:700;cursor:pointer;">Stop</button>
-    <button id="speakBtn" style="padding:8px 14px;border-radius:12px;border:1px solid #bae6fd;
-      background:#fff;color:#0369a1;font-weight:700;cursor:pointer;">Speak reply</button>
+    <button id="speakBtn" type="button" style="padding:8px 14px;border-radius:12px;border:1px solid #bae6fd;
+      background:#fff;color:#0369a1;font-weight:700;cursor:pointer;">Speak last reply</button>
     <span id="status" style="color:#0c4a6e;font-weight:600;font-size:13px;">Ready</span>
   </div>
-  <textarea id="transcript" rows="3" placeholder="Speech appears here. Edit if needed, then Send voice."
+  <textarea id="transcript" rows="3" placeholder="Your speech will appear here. Edit if needed, then press Send to chat."
     style="width:100%;box-sizing:border-box;border-radius:12px;border:1px solid #7dd3fc;
-padding:10px;font-weight:600;color:#0f172a;background:#fff;"></textarea>
-  <div style="margin-top:8px;display:flex;gap:8px;">
-    <button id="sendBtn" style="padding:8px 16px;border-radius:12px;border:none;
+    padding:10px;font-weight:600;color:#0f172a;background:#fff;"></textarea>
+  <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+    <button id="sendBtn" type="button" style="padding:8px 16px;border-radius:12px;border:none;
       background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;font-weight:700;cursor:pointer;">
-      Send voice
+      Send to chat
     </button>
+    <span style="color:#0369a1;font-size:12px;font-weight:600;">Sends transcript into the agent conversation</span>
   </div>
 </div>
 <script>
@@ -575,24 +585,33 @@ padding:10px;font-weight:600;color:#0f172a;background:#fff;"></textarea>
   const stopBtn = document.getElementById('stopBtn');
   const speakBtn = document.getElementById('speakBtn');
   const sendBtn = document.getElementById('sendBtn');
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null;
   let finalText = '';
+  let listening = false;
+
+  function setComponentValue(val) {{
+    window.parent.postMessage({{
+      isStreamlitMessage: true,
+      type: 'streamlit:setComponentValue',
+      value: val
+    }}, '*');
+  }}
 
   function pickVoice() {{
     const voices = speechSynthesis.getVoices() || [];
-    const preferred = voices.find(v => /en(-|_)?(US|GB)/i.test(v.lang) && /neural|natural|premium|google|samantha|aria|jenny/i.test(v.name))
+    return voices.find(v => /en(-|_)?(US|GB)/i.test(v.lang) && /neural|natural|premium|google|samantha|aria|jenny/i.test(v.name))
       || voices.find(v => /en(-|_)?(US|GB)/i.test(v.lang))
-      || voices[0];
-    return preferred || null;
+      || voices[0]
+      || null;
   }}
 
   function humanize(text) {{
     let t = text || '';
-    t = t.replace(/```[\\s\\S]*?```/g, ' code block omitted. ');
-    t = t.replace(/\\n+/g, '. ');
-    t = t.replace(/\\s+/g, ' ').trim();
-    return t.slice(0, 1200);
+    t = t.replace(/```[\s\S]*?```/g, ' code omitted. ');
+    t = t.replace(/\n+/g, '. ');
+    t = t.replace(/\s+/g, ' ').trim();
+    return t.slice(0, 1400);
   }}
 
   function speak(text) {{
@@ -604,62 +623,72 @@ padding:10px;font-weight:600;color:#0f172a;background:#fff;"></textarea>
     u.volume = 1.0;
     const v = pickVoice();
     if (v) u.voice = v;
-    u.onstart = () => status.textContent = 'Speaking...';
-    u.onend = () => status.textContent = 'Ready';
+    u.onstart = () => {{ status.textContent = 'Speaking...'; }};
+    u.onend = () => {{ status.textContent = 'Ready'; }};
     speechSynthesis.speak(u);
   }}
 
-  if (SpeechRecognition) {{
-    rec = new SpeechRecognition();
+  if (SR) {{
+    rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 3;
-    rec.lang = 'en-US';
-    rec.onstart = () => status.textContent = 'Listening...';
-    rec.onerror = (e) => status.textContent = 'Mic: ' + (e.error || 'error');
-    rec.onend = () => status.textContent = finalText ? 'Transcript ready' : 'Ready';
+    rec.lang = navigator.language || 'en-US';
+    rec.onstart = () => {{ listening = true; status.textContent = 'Listening... speak now'; }};
+    rec.onerror = (e) => {{
+      listening = false;
+      status.textContent = 'Mic: ' + (e.error || 'error');
+    }};
+    rec.onend = () => {{
+      listening = false;
+      status.textContent = finalText ? 'Transcript ready — press Send to chat' : 'Ready';
+    }};
     rec.onresult = (event) => {{
       let interim = '';
-      let best = '';
+      let chunk = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {{
         const res = event.results[i];
         let piece = res[0].transcript;
         if (res.length > 1) {{
           let top = res[0];
           for (let j = 1; j < res.length; j++) {{
-            if (res[j].confidence > top.confidence) top = res[j];
+            if ((res[j].confidence || 0) > (top.confidence || 0)) top = res[j];
           }}
           piece = top.transcript;
         }}
-        if (res.isFinal) best += piece + ' ';
+        if (res.isFinal) chunk += piece + ' ';
         else interim += piece;
       }}
-      if (best) finalText += best;
+      if (chunk) finalText += chunk;
       transcript.value = (finalText + ' ' + interim).trim();
     }};
   }} else {{
-    status.textContent = 'Speech recognition not supported in this browser';
+    status.textContent = 'Speech recognition not supported — use Chrome or Edge';
   }}
 
   micBtn.onclick = () => {{
     if (!rec) return;
-    finalText = transcript.value ? transcript.value + ' ' : '';
-    try {{ rec.start(); }} catch (e) {{ status.textContent = 'Mic busy'; }}
+    if (listening) return;
+    finalText = transcript.value ? transcript.value.trim() + ' ' : '';
+    try {{ rec.start(); }} catch (e) {{ status.textContent = 'Mic busy — press Stop then try again'; }}
   }};
   stopBtn.onclick = () => {{
-    if (rec) try {{ rec.stop(); }} catch (e) {{}}
+    if (rec && listening) {{
+      try {{ rec.stop(); }} catch (e) {{}}
+    }}
     speechSynthesis.cancel();
-    status.textContent = 'Stopped';
+    status.textContent = transcript.value.trim() ? 'Stopped — press Send to chat' : 'Stopped';
   }};
   speakBtn.onclick = () => speak({safe});
   sendBtn.onclick = () => {{
     const t = (transcript.value || '').trim();
     if (!t) {{ status.textContent = 'Nothing to send'; return; }}
-    window.parent.postMessage({{ isStreamlitMessage: true, type: 'streamlit:setComponentValue', value: t }}, '*');
+    status.textContent = 'Sending to chat...';
+    setComponentValue(t);
   }};
 
   if ({auto}) {{
-    setTimeout(() => speak({safe}), 400);
+    setTimeout(() => speak({safe}), 500);
   }}
 }})();
 </script>
@@ -685,6 +714,7 @@ def init():
         "last_name": None,
         "zip_files": {},
         "pending_voice": None,
+        "voice_draft": "",
         "last_reply_for_tts": "",
     }
     for k, v in defaults.items():
@@ -803,6 +833,8 @@ st.markdown("# GitHub Agent")
 st.caption("Voice · Gemini · public / private · delete · files")
 
 if st.session_state.voice_enabled:
+    st.markdown("**Voice**")
+    st.caption("Start listening → speak → Stop → Send to chat. Edit the transcript first if needed.")
     voice_val = components.html(
         voice_panel_html(
             st.session_state.last_reply_for_tts,
@@ -810,67 +842,112 @@ if st.session_state.voice_enabled:
             float(st.session_state.voice_rate),
             float(st.session_state.voice_pitch),
         ),
-        height=220,
+        height=240,
     )
     if voice_val and isinstance(voice_val, str) and voice_val.strip():
-        st.session_state.pending_voice = enhance_transcript(voice_val.strip())
+        st.session_state.voice_draft = enhance_transcript(voice_val.strip())
+        st.session_state.pending_voice = st.session_state.voice_draft
+
+    draft = st.text_area(
+        "Voice draft (editable)",
+        value=st.session_state.get("voice_draft", ""),
+        height=80,
+        key="voice_draft_box",
+        label_visibility="collapsed",
+        placeholder="Transcript lands here — edit, then Send voice message",
+    )
+    st.session_state.voice_draft = draft or ""
+    vc1, vc2 = st.columns(2)
+    with vc1:
+        if st.button("Send voice message", use_container_width=True):
+            text = enhance_transcript(st.session_state.voice_draft)
+            if text:
+                st.session_state.pending_voice = text
+                st.session_state.voice_draft = ""
+                st.rerun()
+            else:
+                st.warning("Empty transcript")
+    with vc2:
+        if st.button("Clear voice draft", use_container_width=True):
+            st.session_state.voice_draft = ""
+            st.session_state.pending_voice = None
+            st.rerun()
 
 tok_est = sum(tokens(m.get("content", "")) for m in st.session_state.messages)
 if tok_est:
-    st.caption(f"Context ~ {tok_est} tokens")
+    st.caption(f"Context ~ {tok_est} tokens · {len(st.session_state.messages)} messages")
 
 for i, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        if msg["role"] == "user" and st.button("Resend", key=f"r_{i}"):
-            st.session_state.messages = st.session_state.messages[:i]
-            st.session_state["_resend"] = msg["content"]
-            st.rerun()
+        if msg["role"] == "user":
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("Resend", key=f"r_{i}"):
+                    st.session_state.messages = st.session_state.messages[:i]
+                    st.session_state["_resend"] = msg["content"]
+                    st.rerun()
+            with b2:
+                if st.button("Copy", key=f"c_{i}"):
+                    st.session_state["_clip"] = msg["content"]
+                    st.toast("Copied to session")
 
 prompt = (
     st.session_state.pop("pending_voice", None)
-    or st.chat_input("Message...")
     or st.session_state.pop("_resend", None)
+    or st.chat_input("Message...")
 )
 
 if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    prompt = str(prompt).strip()
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    with st.chat_message("assistant"):
-        with st.spinner("..."):
-            model = st.session_state.active_model
-            history = compact([
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages[-10:]
-            ])
-            system = SYSTEM
-            if st.session_state.file_expert:
-                system += "\nFile Expert mode enabled."
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                model = st.session_state.active_model
+                history = compact([
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ])
+                system = SYSTEM
+                if st.session_state.file_expert:
+                    system += "\nFile Expert mode enabled."
+                if st.session_state.github_user:
+                    system += f"\nAuthenticated GitHub user: {st.session_state.github_user.get('login')}."
 
-            reply = call_llm(
-                st.session_state.provider,
-                st.session_state.api_key,
-                model,
-                history,
-                system,
-            )
-            st.markdown(reply)
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            st.session_state.last_reply_for_tts = reply
+                reply = call_llm(
+                    st.session_state.provider,
+                    st.session_state.api_key,
+                    model,
+                    history,
+                    system,
+                )
+                st.markdown(reply)
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+                st.session_state.last_reply_for_tts = reply
 
-            if "```json" in reply and st.session_state.github_token:
-                try:
-                    js = reply.split("```json")[1].split("```")[0].strip()
-                    data = json.loads(js)
-                    action = data.get("action", "")
-                    params = data.get("params") or {}
-                    result = run_action(action, params, st.session_state.github_token, st.session_state.github_user)
-                    st.info(result)
-                except Exception as e:
-                    st.caption(str(e))
-    st.rerun()
+                if "```json" in reply and st.session_state.github_token:
+                    try:
+                        js = reply.split("```json")[1].split("```")[0].strip()
+                        data = json.loads(js)
+                        action = data.get("action", "")
+                        params = data.get("params") or {}
+                        result = run_action(
+                            action, params,
+                            st.session_state.github_token,
+                            st.session_state.github_user,
+                        )
+                        st.info(result)
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": f"Action result: {result}",
+                        })
+                    except Exception as e:
+                        st.caption(str(e))
+        st.rerun()
 
 if st.session_state.last_file:
     st.markdown("---")
